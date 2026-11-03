@@ -56,8 +56,8 @@ class LogFormatUtilsTests {
 	@Test
 	void formatValueReplacesNewlines() {
 		String result = LogFormatUtils.formatValue("a\nb\rc", -1, true);
-		assertThat(result).isEqualTo("\"a<LF>b<CR>c\"");
-		assertThat(result).contains("<LF>").contains("<CR>").doesNotContain("\n").doesNotContain("\r");
+		assertThat(result).isEqualTo("\"a<EOL>b<EOL>c\"");
+		assertThat(result).contains("<EOL>").doesNotContain("\n").doesNotContain("\r");
 	}
 
 	@Test
@@ -73,7 +73,46 @@ class LogFormatUtilsTests {
 				return "line1\r\nline2";
 			}
 		};
-		assertThat(LogFormatUtils.formatValue(value, -1, true)).isEqualTo("line1<CR><LF>line2");
+		assertThat(LogFormatUtils.formatValue(value, -1, true)).isEqualTo("line1<EOL><EOL>line2");
+	}
+
+	@Test
+	void formatValueReplacesControlCharacters() {
+		String result = LogFormatUtils.formatValue("a\u001b[31mb\tc\u0000d\u007fe\u0085f", -1, true);
+		assertThat(result).isEqualTo("\"a?[31mb?c?d?e?f\"");
+		assertThat(result).doesNotContain("\u001b").doesNotContain("\t")
+				.doesNotContain("\u0000").doesNotContain("\u007f").doesNotContain("\u0085");
+	}
+
+	@Test
+	void formatValueKeepsControlCharactersWhenNotReplacing() {
+		String value = "a\u001b[31mb\tc\u0000d";
+		assertThat(LogFormatUtils.formatValue(value, -1, false)).isEqualTo("\"" + value + "\"");
+	}
+
+	@Test
+	void formatValueReplacesControlCharactersInNonCharSequence() {
+		Object value = new Object() {
+			@Override
+			public String toString() {
+				return "status\u001b[2K\u0008\u0008ok";
+			}
+		};
+		assertThat(LogFormatUtils.formatValue(value, -1, true)).isEqualTo("status?[2K??ok");
+	}
+
+	@Test
+	void formatValueWithLimitLengthReplacesControlCharacters() {
+		String forged = "user\u001b[1A\u001b[2K2021-10-01 INFO forged log entry";
+		String result = LogFormatUtils.formatValue(forged, true);
+		assertThat(result).isEqualTo("\"user?[1A?[2K2021-10-01 INFO forged log entry\"");
+		assertThat(result).doesNotContain("\u001b");
+	}
+
+	@Test
+	void formatValueWithoutLimitLengthKeepsControlCharacters() {
+		String value = "user\u001b[1A\tentry";
+		assertThat(LogFormatUtils.formatValue(value, false)).isEqualTo("\"" + value + "\"");
 	}
 
 	@Test
@@ -88,7 +127,7 @@ class LogFormatUtilsTests {
 	void formatValueWithLimitLengthPreventsLogForging() {
 		String forged = "user\r\n2021-10-01 INFO forged log entry";
 		String result = LogFormatUtils.formatValue(forged, true);
-		assertThat(result).isEqualTo("\"user<CR><LF>2021-10-01 INFO forged log entry\"");
+		assertThat(result).isEqualTo("\"user<EOL><EOL>2021-10-01 INFO forged log entry\"");
 		assertThat(result).doesNotContain("\n").doesNotContain("\r");
 	}
 
