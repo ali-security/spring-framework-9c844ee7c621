@@ -16,6 +16,7 @@
 
 package org.springframework.util;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Properties;
@@ -773,6 +774,33 @@ class StringUtilsTests {
 		assertThat(StringUtils.split(null, ",")).isNull();
 		assertThat(StringUtils.split("Hello, world", null)).isNull();
 		assertThat(StringUtils.split(null, null)).isNull();
+	}
+
+	@Test
+	void uriDecode() {
+		assertThat(StringUtils.uriDecode("", StandardCharsets.UTF_8)).isEqualTo("");
+		assertThat(StringUtils.uriDecode("foobar", StandardCharsets.UTF_8)).isEqualTo("foobar");
+		assertThat(StringUtils.uriDecode("foo%20bar", StandardCharsets.UTF_8)).isEqualTo("foo bar");
+		assertThat(StringUtils.uriDecode("T%C5%8Dky%C5%8D", StandardCharsets.UTF_8)).isEqualTo("T\u014dky\u014d");
+		assertThat(StringUtils.uriDecode("/Z%C3%BCrich", StandardCharsets.UTF_8)).isEqualTo("/Z\u00fcrich");
+		assertThat(StringUtils.uriDecode("%20\u2019", StandardCharsets.UTF_8)).isEqualTo(" \u2019");
+		assertThat(StringUtils.uriDecode("\u015bp\u0159\u00ec\u0144\u0121", StandardCharsets.UTF_8)).isEqualTo("\u015bp\u0159\u00ec\u0144\u0121");
+		assertThat(StringUtils.uriDecode("%20\u015bp\u0159\u00ec\u0144\u0121", StandardCharsets.UTF_8)).isEqualTo(" \u015bp\u0159\u00ec\u0144\u0121");
+	}
+
+	@Test
+	void uriDecodeKeepsCharactersAboveLatin1() {
+		// U+012E has 0x2E ('.') as its low byte; truncating it would forge a ".." path segment
+		assertThat(StringUtils.uriDecode("\u012e%2e/", StandardCharsets.UTF_8)).isEqualTo("\u012e./");
+	}
+
+	@Test
+	void uriDecodeInvalidSequence() {
+		assertThatIllegalArgumentException().isThrownBy(() -> StringUtils.uriDecode("foo%2", StandardCharsets.UTF_8));
+		assertThatIllegalArgumentException().isThrownBy(() -> StringUtils.uriDecode("foo%", StandardCharsets.UTF_8));
+		assertThatIllegalArgumentException().isThrownBy(() -> StringUtils.uriDecode("%", StandardCharsets.UTF_8));
+		assertThatIllegalArgumentException().isThrownBy(() -> StringUtils.uriDecode("%zz", StandardCharsets.UTF_8));
+		assertThatIllegalArgumentException().isThrownBy(() -> StringUtils.uriDecode("foo", null));
 	}
 
 }

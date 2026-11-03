@@ -16,7 +16,6 @@
 
 package org.springframework.util;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -745,19 +744,15 @@ public abstract class StringUtils {
 	}
 
 	/**
-	 * Decode the given encoded URI component value. Based on the following rules:
-	 * <ul>
-	 * <li>Alphanumeric characters {@code "a"} through {@code "z"}, {@code "A"} through {@code "Z"},
-	 * and {@code "0"} through {@code "9"} stay the same.</li>
-	 * <li>Special characters {@code "-"}, {@code "_"}, {@code "."}, and {@code "*"} stay the same.</li>
-	 * <li>A sequence "{@code %<i>xy</i>}" is interpreted as a hexadecimal representation of the character.</li>
-	 * </ul>
-	 * @param source the encoded String
-	 * @param charset the character set
+	 * Decode the given encoded URI component value by replacing "<i>{@code %xy}</i>" sequences
+	 * by an hexadecimal representation of the character in the specified charset, letting other
+	 * characters unchanged.
+	 * @param source the encoded {@code String}
+	 * @param charset the character encoding to use to decode the "<i>{@code %xy}</i>" sequences
 	 * @return the decoded value
 	 * @throws IllegalArgumentException when the given source contains invalid encoded sequences
 	 * @since 5.0
-	 * @see java.net.URLDecoder#decode(String, String)
+	 * @see java.net.URLDecoder#decode(String, String) java.net.URLDecoder#decode for HTML form decoding
 	 */
 	public static String uriDecode(String source, Charset charset) {
 		int length = source.length();
@@ -765,33 +760,48 @@ public abstract class StringUtils {
 			return source;
 		}
 		Assert.notNull(charset, "Charset must not be null");
+		int firstPercentIndex = source.indexOf('%');
+		if (firstPercentIndex < 0) {
+			return source;
+		}
 
-		ByteArrayOutputStream baos = new ByteArrayOutputStream(length);
-		boolean changed = false;
-		for (int i = 0; i < length; i++) {
-			int ch = source.charAt(i);
+		StringBuilder output = new StringBuilder(length);
+		output.append(source, 0, firstPercentIndex);
+		byte[] bytes = null;
+		int i = firstPercentIndex;
+		while (i < length) {
+			char ch = source.charAt(i);
 			if (ch == '%') {
-				if (i + 2 < length) {
-					char hex1 = source.charAt(i + 1);
-					char hex2 = source.charAt(i + 2);
-					int u = Character.digit(hex1, 16);
-					int l = Character.digit(hex2, 16);
+				if (bytes == null) {
+					bytes = new byte[(length - i) / 3];
+				}
+
+				int pos = 0;
+				while (i + 2 < length && ch == '%') {
+					int u = Character.digit(source.charAt(i + 1), 16);
+					int l = Character.digit(source.charAt(i + 2), 16);
 					if (u == -1 || l == -1) {
 						throw new IllegalArgumentException("Invalid encoded sequence \"" + source.substring(i) + "\"");
 					}
-					baos.write((char) ((u << 4) + l));
-					i += 2;
-					changed = true;
+					bytes[pos++] = (byte) ((u << 4) + l);
+					i += 3;
+					if (i < length) {
+						ch = source.charAt(i);
+					}
 				}
-				else {
-					throw new IllegalArgumentException("Invalid encoded sequence \"" + source.substring(i) + "\"");
+
+				if (i < length && ch == '%') {
+					throw new IllegalArgumentException("Incomplete trailing escape (%) pattern");
 				}
+
+				output.append(new String(bytes, 0, pos, charset));
 			}
 			else {
-				baos.write(ch);
+				output.append(ch);
+				i++;
 			}
 		}
-		return (changed ? StreamUtils.copyToString(baos, charset) : source);
+		return output.toString();
 	}
 
 	/**
