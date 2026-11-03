@@ -97,13 +97,33 @@ class MimeTypeTests {
 	}
 
 	@Test
-	void parseQuotedSeparator() {
+	void parseQuotedParameterValue() {
 		String s = "application/xop+xml;charset=utf-8;type=\"application/soap+xml;action=\\\"https://x.y.z\\\"\"";
 		MimeType mimeType = MimeType.valueOf(s);
 		assertThat(mimeType.getType()).as("Invalid type").isEqualTo("application");
 		assertThat(mimeType.getSubtype()).as("Invalid subtype").isEqualTo("xop+xml");
 		assertThat(mimeType.getCharset()).as("Invalid charset").isEqualTo(StandardCharsets.UTF_8);
 		assertThat(mimeType.getParameter("type")).isEqualTo("\"application/soap+xml;action=\\\"https://x.y.z\\\"\"");
+	}
+
+	@Test  //  gh-36730
+	void parseParameterWithQuotedPair() {
+		String s = "text/plain;twelve=\"1\\\"2\"";
+		MimeType mimeType = MimeType.valueOf(s);
+		assertThat(mimeType.getType()).as("Invalid type").isEqualTo("text");
+		assertThat(mimeType.getSubtype()).as("Invalid subtype").isEqualTo("plain");
+		assertThat(mimeType.getParameter("twelve")).isEqualTo("\"1\\\"2\"");
+	}
+
+	@Test  // CVE-2026-41853
+	void parseParameterWithQuotedPairDoesNotSplitQuotedValue() {
+		String s = "multipart/form-data;boundary=\"a\\\";boundary=b;c=\"d\\\"";
+		MimeType mimeType = MimeType.valueOf(s);
+		assertThat(mimeType.getType()).as("Invalid type").isEqualTo("multipart");
+		assertThat(mimeType.getSubtype()).as("Invalid subtype").isEqualTo("form-data");
+		assertThat(mimeType.getParameters()).hasSize(1);
+		assertThat(mimeType.getParameter("boundary")).isEqualTo("\"a\\\";boundary=b;c=\"d\\\"");
+		assertThat(mimeType.getParameter("c")).isNull();
 	}
 
 	@Test
@@ -283,6 +303,13 @@ class MimeTypeTests {
 	void parseMimeTypeIllegalQuotedParameterValue() {
 		assertThatExceptionOfType(InvalidMimeTypeException.class).isThrownBy(() ->
 				MimeTypeUtils.parseMimeType("audio/*;attr=\""));
+	}
+
+	@Test  // gh-36971
+	void parseMimeTypeWrappedInQuotes() {
+		assertThatExceptionOfType(InvalidMimeTypeException.class)
+				.isThrownBy(() -> MimeTypeUtils.parseMimeType("\"application/xml\""))
+				.withMessageContaining("Invalid token character '\"'");
 	}
 
 	@Test
