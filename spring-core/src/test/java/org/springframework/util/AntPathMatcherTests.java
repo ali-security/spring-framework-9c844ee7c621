@@ -16,7 +16,9 @@
 
 package org.springframework.util;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -27,6 +29,8 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /**
  * Unit tests for {@link AntPathMatcher}.
@@ -701,6 +705,60 @@ class AntPathMatcherTests {
 	@Test // gh-23297
 	void isPatternWithNullPath() {
 		assertThat(pathMatcher.isPattern(null)).isFalse();
+	}
+
+	@Test  // CVE-2026-41848
+	void patternWithEmbeddedRegexDoesNotAllowCatastrophicBacktracking() {
+		// A URI template variable lets an attacker-supplied pattern inject an arbitrary
+		// regular expression: "(a+)+b" is the textbook exponential backtracking case.
+		String pattern = "/{var:(a+)+b}";
+		// The trailing 'b' is missing, so the engine has to exhaust every partition.
+		String path = "/" + repeat('a', 64);
+
+		assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+			assertThatIllegalStateException()
+					.isThrownBy(() -> pathMatcher.match(pattern, path))
+					.withMessageContaining("Too many character access attempts");
+			assertThatIllegalStateException()
+					.isThrownBy(() -> pathMatcher.matchStart(pattern, path))
+					.withMessageContaining("Too many character access attempts");
+			assertThatIllegalStateException()
+					.isThrownBy(() -> pathMatcher.extractUriTemplateVariables(pattern, path))
+					.withMessageContaining("Too many character access attempts");
+		});
+	}
+
+	@Test  // CVE-2026-41848
+	void wildcardOnlyPatternDoesNotAllowCatastrophicBacktracking() {
+		// No embedded regex at all: a chain of '*' wildcards compiles to ".*a.*a...b",
+		// which backtracks super-polynomially against an input that never matches.
+		String pattern = "/*a*a*a*a*a*a*a*a*a*a*a*b";
+		String path = "/" + repeat('a', 100);
+
+		assertTimeoutPreemptively(Duration.ofSeconds(20), () ->
+				assertThatIllegalStateException()
+						.isThrownBy(() -> pathMatcher.match(pattern, path))
+						.withMessageContaining("Too many character access attempts"));
+	}
+
+	@Test  // CVE-2026-41848
+	void guardDoesNotAffectLegitimateMatching() {
+		// The attempt counter is per match invocation, so ordinary (linear) matching of
+		// long segments, repeated many times, must keep working.
+		String path = "/" + repeat('a', 100_000) + "/suffix";
+		for (int i = 0; i < 5; i++) {
+			assertThat(pathMatcher.match("/*/suffix", path)).isTrue();
+			assertThat(pathMatcher.match("/{var}/suffix", path)).isTrue();
+			assertThat(pathMatcher.extractUriTemplateVariables("/{var}/suffix", path))
+					.containsEntry("var", repeat('a', 100_000));
+			assertThat(pathMatcher.match("/*/other", path)).isFalse();
+		}
+	}
+
+	private static String repeat(char c, int count) {
+		char[] chars = new char[count];
+		Arrays.fill(chars, c);
+		return new String(chars);
 	}
 
 }
